@@ -23,50 +23,70 @@ class Classifier(nn.Module):
         return out
 
 
+def impute(data):
+    imputer = SimpleImputer(strategy='mean')
+    data_imputed = imputer.fit_transform(data)
+    return pd.DataFrame(data_imputed, columns=data.columns)
+
+
+def categoriesToNumbers(data):
+    for i, row in data.iterrows():
+        val = data.at[i,'algae bloom']
+        res = 1 if val == 'yes' else 0
+        data.at[i,'algae bloom'] = res
+
+
+def getData(input_path):
+    data = pd.read_csv(input_path)
+    data = data.drop(['date'], axis=1)
+    return data
+
+
+def convertToInt(data):
+    data['algae bloom'] = data['algae bloom'].astype(int)
+
+
+def getFeaturesAndTarget(data, features: list, target: str):
+    X = data[features]
+    y = data[target]
+    return X, y
+
+
+def getTensors(X, y):
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+    y_tensor = torch.tensor(y, dtype=torch.long)
+    return X_tensor, y_tensor
+
+
+def formatData(data):
+    categoriesToNumbers(data)
+    data = impute(data)
+    convertToInt(data)
+    return data
+
 
 def train():
 
-    # Read in data, drop date column
-    data_raw = pd.read_csv('../data/input_data.csv')
-    data_raw = data_raw.drop(['date'], axis=1)
+    data_raw = getData('../data/input_data.csv')
+    data = formatData(data_raw)
 
-    # Transform yes/no into 1/0
-    for i, row in data_raw.iterrows():
-        val = data_raw.at[i,'algae bloom']
-        res = 1 if val == 'yes' else 0
-        data_raw.at[i,'algae bloom'] = res
+    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']
+    target = 'algae bloom'
+    X, y = getFeaturesAndTarget(data, features, target)
 
-    # Impute missing values with mean
-    imputer = SimpleImputer(strategy='mean')
-    data_imputed = imputer.fit_transform(data_raw)
+    X_tensor, y_tensor = getTensors(X, y)
 
-    data = pd.DataFrame(data_imputed, columns=data_raw.columns)
-
-    data['algae bloom'] = data['algae bloom'].astype(int)
-
-    # print(data.head())
-
-    # Get features, target
-    X = data[['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']]
-    y = data['algae bloom']
-
-    # Normalize features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    # Convert data to PyTorch tensors
-    X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
-    y_tensor = torch.tensor(y, dtype=torch.long)
-
-    # Split data into training and testing sets
+    # train/test split
     X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
 
-    # Define hyperparameters
+    # hyperparameters
     input_size = X_train.shape[1]
-    hidden_size = 128
-    output_size = 2  # Since there are two classes ("yes" and "no")
+    hidden_size = 25  # 5 predictors... no sure what I sure set here
+    output_size = 2  # 2 classes "yes" (1), "no" (0)
 
-    # Initialize the model, loss function, and optimizer
+    # model, loss function, optimizer
     model = Classifier(input_size, hidden_size, output_size)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -74,11 +94,12 @@ def train():
     # Training the model
     num_epochs = 100
     for epoch in range(num_epochs):
+
         # Forward pass
         outputs = model(X_train)
         loss = criterion(outputs, y_train)
 
-        # Backward pass and optimization
+        # Backward pass & optimization
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -86,7 +107,7 @@ def train():
         if (epoch+1) % 10 == 0:
             print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
 
-    # Evaluate the model
+    # Evaluation
     with torch.no_grad():
         model.eval()
         outputs = model(X_test)
