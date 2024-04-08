@@ -1,16 +1,14 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import pyarrow.parquet as pq
-# import pydoop.hdfs as hd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
 from hdfs import InsecureClient
-
-# Initialize distributed environment
-# Make sure you have set up the distributed environment properly
-# torch.distributed.init_process_group(backend='YOUR_BACKEND', init_method='YOUR_INIT_METHOD')
+import torch.distributed as dist
+import datetime
 
 
 # Define neural network architecture
@@ -144,5 +142,16 @@ def train():
         
     '''
 
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'richmond'
+    os.environ['MASTER_PORT'] = '17171'
+    dist.init_process_group('gloo', rank=int(rank), world_size=int(world_size), init_method="tcp://porsche:23456", timeout=datetime.timedelta(weeks=120))
+    torch.manual_seed(42)
+
+
 if __name__ == "__main__":
-    train()
+    try:
+        setup(sys.argv[1], sys.argv[2])
+        train()
+    except Exception as e:
+        traceback.print_exc()
