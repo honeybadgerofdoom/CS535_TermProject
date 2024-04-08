@@ -1,12 +1,17 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import pandas as pd
+import pyarrow.parquet as pq
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
 
+# Initialize distributed environment
+# Make sure you have set up the distributed environment properly
+# torch.distributed.init_process_group(backend='YOUR_BACKEND', init_method='YOUR_INIT_METHOD')
 
+
+# Define neural network architecture
 class Classifier(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super(Classifier, self).__init__()
@@ -22,12 +27,13 @@ class Classifier(nn.Module):
         out = self.softmax(out)
         return out
 
-
-
 def train():
 
-    # Read in data, drop date column
-    data_raw = pd.read_csv('../data/input_data.csv')
+    # Read data from HDFS using PyArrow
+    hdfs_path = 'hdfs://richmond:30101/cs535/termProject/input_data.csv'
+    table = pq.read_table(hdfs_path)
+    data_raw = table.to_pandas()
+
     data_raw = data_raw.drop(['date'], axis=1)
 
     # Transform yes/no into 1/0
@@ -40,15 +46,18 @@ def train():
     imputer = SimpleImputer(strategy='mean')
     data_imputed = imputer.fit_transform(data_raw)
 
+    # Convert to DataFrame
     data = pd.DataFrame(data_imputed, columns=data_raw.columns)
 
     data['algae bloom'] = data['algae bloom'].astype(int)
 
-    # print(data.head())
+    # Split data into features and target
+    X = data_imputed[['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']]
+    y = data_imputed['algae_bloom']
 
-    # Get features, target
-    X = data[['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']]
-    y = data['algae bloom']
+    # Convert target variable to numerical format
+    label_encoder = LabelEncoder()
+    y = label_encoder.fit_transform(y)
 
     # Normalize features
     scaler = StandardScaler()
@@ -61,6 +70,7 @@ def train():
     # Split data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
 
+
     # Define hyperparameters
     input_size = X_train.shape[1]
     hidden_size = 128
@@ -70,6 +80,15 @@ def train():
     model = Classifier(input_size, hidden_size, output_size)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # Distributed training loop
+    # Make sure to use DistributedSampler for distributed data loading
+    # Use DistributedDataParallel for distributed training
+    # Example:
+    # sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+    # train_loader = torch.utils.data.DataLoader(dataset, sampler=sampler)
+    # model = torch.nn.parallel.DistributedDataParallel(model)
+    # Also, make sure to adjust the batch size accordingly for distributed training
 
     # Training the model
     num_epochs = 100
@@ -93,7 +112,6 @@ def train():
         _, predicted = torch.max(outputs, 1)
         accuracy = (predicted == y_test).sum().item() / y_test.size(0)
         print(f'Accuracy: {accuracy:.4f}')
-
 
 if __name__ == "__main__":
     train()
