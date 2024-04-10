@@ -9,10 +9,12 @@ from sklearn.impute import SimpleImputer
 from hdfs import InsecureClient
 import torch.distributed as dist
 import datetime
+import random
 
 
 # Define neural network architecture
 class Classifier(nn.Module):
+
     def __init__(self, input_size, hidden_size, output_size):
         super(Classifier, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
@@ -26,6 +28,41 @@ class Classifier(nn.Module):
         out = self.fc2(out)
         out = self.softmax(out)
         return out
+
+
+class Partition(object):
+
+    def __init__(self, data, index):
+        self.data = date
+        self.index = index
+
+    def __len__(self):
+        return len(self.data.index)
+
+    def __getitem__(self, index):
+        data_idx = self.index[index]
+        return self.data[data_idx]
+
+
+class DataPartitioner(object):
+
+    def __init__(self, data, sizes=[0.7, 0.2, 0.1], seed=1234):
+        self.data = data
+        self.partitions = []
+        rng = Random()
+        rng.seed(seed)
+        data_len = len(data)
+        indexes = [x for x in range(0, data_len)]
+        rng.shuffle(indexes)
+
+        for frac in sizes:
+            part_len = int(frac * data_len)
+            self.partitions.append(indexes[0:part_len])
+            indexes = indexes[part_len:]
+
+    def use(self, partition):
+        return Partition(self.data, self.partitions[partition])
+
 
 
 def impute(data):
@@ -74,13 +111,9 @@ def formatData(data):
 
 def train():
 
-    hdfs_root = "hdfs://richmond:30101"
-    hdfs_client = InsecureClient(hdfs_root)
-    input_data_path = "cs535/termProject/input_data.csv"
-
-    with hdfs_client.read(input_data_path) as reader:
-        data_raw = pd.read_csv(reader)
-    print(data_raw.head())
+    print('hello world')
+    # what is the `spark` variable here? how initialize?
+    # data_raw = spark.read.csv("hdfs:///cs535/termProject/input_data.csv", header=True, inferSchema=True)
 
     '''
     data = formatData(data_raw)
