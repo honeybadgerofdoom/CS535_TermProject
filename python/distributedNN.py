@@ -1,4 +1,6 @@
 import os
+
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -127,10 +129,15 @@ def train():
         csv_stream = io.StringIO(csv_data)
         csv_reader = csv.reader(csv_stream)
         data_raw = [row for row in csv_reader]
-
+    data_raw = pd.DataFrame(data_raw)
     print(data_raw[:5])
-    '''
+
+    data_raw = data_raw.drop(['date'], axis=1)
+
     data = formatData(data_raw)
+    print(data[:5])
+
+    '''
 
     features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']
     target = 'algae bloom'
