@@ -10,6 +10,13 @@ from hdfs import InsecureClient
 import torch.distributed as dist
 import datetime
 import random
+import io
+import csv
+
+# import pyspark
+# from pyspark.sql import SparkSession
+# from sedona.utils import SedonaKryoRegistrator, KryoSerializer
+
 
 
 # Define neural network architecture
@@ -112,9 +119,33 @@ def formatData(data):
 def train():
 
     print('hello world')
+    data_path = '/cs535/termProject/input_data.csv'
     # what is the `spark` variable here? how initialize?
+
+    # spark = SparkSession \
+    #     .builder \
+    #     .appName('AlgaeBloomPredictor') \
+    #     .master('spark://richmond:30101') \
+    #     .config("spark.yarn.resourcemanager.address", "saint-paul.cs.colostate.edu:30110") \
+    #     .config("spark.serializer", KryoSerializer.getName) \
+    #     .config("spark.kryo.registrator", SedonaKryoRegistrator.getName) \
+    #     .config('spark.jars.packages',
+    #             'org.apache.sedona:sedona-spark-3.5_2.12:1.5.1,'
+    #             'org.datasyslab:geotools-wrapper:1.5.1-28.2') \
+    #     .config('spark.jars.repositories', 'https://artifacts.unidata.ucar.edu/repository/unidata-all') \
+    #     .getOrCreate()
+    #
+    # spark.sparkContext.setLogLevel("ERROR")
     # data_raw = spark.read.csv("hdfs:///cs535/termProject/input_data.csv", header=True, inferSchema=True)
 
+
+    client = InsecureClient('http://richmond.cs.colostate.edu:30101')
+    # with client.read(data_path) as reader:
+    #     csv_data = reader.read()
+    #     csv_data = csv_data.decode('utf-8')
+    #     csv_stream = io.StringIO(csv_data)
+    #     csv_reader = csv.reader(csv_stream)
+    #     data_raw = [row for row in csv_reader]
     '''
     data = formatData(data_raw)
 
@@ -183,8 +214,10 @@ def setup(rank, world_size):
 
 
 if __name__ == "__main__":
-    try:
-        setup(sys.argv[1], sys.argv[2])
+    # if len(sys.argv) != 3:
+    #     print('Please provide a rank and world size')
+    # try:
+    #     setup(sys.argv[1], sys.argv[2])
         train()
-    except Exception as e:
-        traceback.print_exc()
+    # except Exception as e:
+    #     traceback.print_exc()
