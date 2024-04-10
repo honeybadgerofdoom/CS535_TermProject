@@ -139,13 +139,15 @@ def train():
     # data_raw = spark.read.csv("hdfs:///cs535/termProject/input_data.csv", header=True, inferSchema=True)
 
 
-    client = InsecureClient('http://richmond.cs.colostate.edu:30101')
-    # with client.read(data_path) as reader:
-    #     csv_data = reader.read()
-    #     csv_data = csv_data.decode('utf-8')
-    #     csv_stream = io.StringIO(csv_data)
-    #     csv_reader = csv.reader(csv_stream)
-    #     data_raw = [row for row in csv_reader]
+    client = InsecureClient('http://richmond.cs.colostate.edu:30102')
+    with client.read(data_path) as reader:
+        csv_data = reader.read()
+        csv_data = csv_data.decode('utf-8')
+        csv_stream = io.StringIO(csv_data)
+        csv_reader = csv.reader(csv_stream)
+        data_raw = [row for row in csv_reader]
+
+    print(data_raw[:5])
     '''
     data = formatData(data_raw)
 
