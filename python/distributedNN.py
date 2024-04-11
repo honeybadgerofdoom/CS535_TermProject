@@ -1,19 +1,30 @@
 import os
-
-import pandas as pd
+import sys
 import torch
+import random
+import numpy as np
+import subprocess
+import math
+from skimage.transform import resize
+import socket
+import traceback
+import datetime
+from torch.multiprocessing import Process
+from torchvision import datasets, transforms
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-import pyarrow.parquet as pq
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from torch.utils import data
+from random import Random
+
+
+import io
+import csv
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from hdfs import InsecureClient
 import torch.distributed as dist
-import datetime
-import random
-import io
-import csv
 
 
 class Classifier(nn.Module):
@@ -36,7 +47,7 @@ class Classifier(nn.Module):
 class Partition(object):
 
     def __init__(self, data, index):
-        self.data = date
+        self.data = data
         self.index = index
 
     def __len__(self):
@@ -112,10 +123,8 @@ def formatData(data):
     return data
 
 
-def train():
-
+def partition_dataset():
     data_path = '/cs535/termProject/input_data_no_header.csv'
-
     client = InsecureClient('http://richmond.cs.colostate.edu:30102')
     with client.read(data_path) as reader:
         csv_data = reader.read()
@@ -124,68 +133,28 @@ def train():
         csv_reader = csv.reader(csv_stream)
         data_raw = [row for row in csv_reader][1:]
     data_raw = pd.DataFrame(data_raw, columns=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom'])
+    dataset = formatData(data_raw)
+    print(dataset[:5])
 
-    data = formatData(data_raw)
-    print(data[:5])
+    size = dist.get_world_size()
+    bsz = int(128 / float(size))
+    partition_sizes = [1.0 / size for _ in range(size)]
+    partition = DataPartitioner(dataset, partition_sizes)
+    partition = partition.use(dist.get_rank())
+    train_set = torch.utils.data.DataLoader(partition, batch_size=bsz, shuffle=True)
+    return train_set, bsz
 
-    '''
 
-    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
-    target = 'algae bloom'
-    X, y = getFeaturesAndTarget(data, features, target)
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='', printEnd='\r'):
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
 
-    X_tensor, y_tensor = getTensors(X, y)
 
-    # train/test split
-    X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
+def train():
+    print('hello world')
+    train_set, bsz = partition_dataset()
 
-    # hyperparameters
-    input_size = X_train.shape[1]
-    hidden_size = 25  # 5 predictors... no sure what I sure set here
-    output_size = 2  # 2 classes "yes" (1), "no" (0)
-
-    # model, loss function, optimizer
-    model = Classifier(input_size, hidden_size, output_size)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    '''
-
-    '''
-    Distributed training loop
-    Make sure to use DistributedSampler for distributed data loading
-    Use DistributedDataParallel for distributed training
-    Example:
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-    train_loader = torch.utils.data.DataLoader(dataset, sampler=sampler)
-    model = torch.nn.parallel.DistributedDataParallel(model)
-    Also, make sure to adjust the batch size accordingly for distributed training
-    '''
-
-    '''
-    # TRAINING
-    num_epochs = 100
-    for epoch in range(num_epochs):
-        # Forward pass
-        outputs = model(X_train)
-        loss = criterion(outputs, y_train)
-
-        # Backward pass and optimization
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        if (epoch+1) % 10 == 0:
-            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
-
-    # EVAL
-    with torch.no_grad():
-        model.eval()
-        outputs = model(X_test)
-        _, predicted = torch.max(outputs, 1)
-        accuracy = (predicted == y_test).sum().item() / y_test.size(0)
-        print(f'Accuracy: {accuracy:.4f}')
-        
-    '''
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'richmond'
@@ -195,10 +164,10 @@ def setup(rank, world_size):
 
 
 if __name__ == "__main__":
-    # if len(sys.argv) != 3:
-    #     print('Please provide a rank and world size')
-    # try:
-    #     setup(sys.argv[1], sys.argv[2])
+    if len(sys.argv) != 3:
+        print('Please provide a rank and world size')
+    try:
+        setup(sys.argv[1], sys.argv[2])
         train()
-    # except Exception as e:
-    #     traceback.print_exc()
+    except Exception as e:
+        traceback.print_exc()
