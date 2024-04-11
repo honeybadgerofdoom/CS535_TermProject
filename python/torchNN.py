@@ -31,14 +31,24 @@ def impute(data):
 
 def categoriesToNumbers(data):
     for i, row in data.iterrows():
-        val = data.at[i,'algae bloom']
-        res = 1 if val == 'yes' else 0
-        data.at[i,'algae bloom'] = res
+        alg = data.at[i,'algae bloom']
+        alg_res = 1 if alg == 'yes' else 0
+        data.at[i,'algae bloom'] = alg_res
+
+        date = data.at[i, 'week']
+        parts = date.split('-')
+        date_res = int(parts[1])
+        data.at[i,'week'] = date_res
 
 
 def getData(input_path):
-    data = pd.read_csv(input_path)
-    data = data.drop(['date'], axis=1)
+    data = pd.read_csv(
+        input_path,
+        skiprows=1,
+        usecols=[0,1,2,3,4,5,6],
+        names=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom']
+    )
+    print(data.head())
     return data
 
 
@@ -72,7 +82,7 @@ def train():
     data_raw = getData('../data/input_data.csv')
     data = formatData(data_raw)
 
-    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']
+    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
     target = 'algae bloom'
     X, y = getFeaturesAndTarget(data, features, target)
 

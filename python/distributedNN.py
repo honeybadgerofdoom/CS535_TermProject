@@ -15,13 +15,7 @@ import random
 import io
 import csv
 
-# import pyspark
-# from pyspark.sql import SparkSession
-# from sedona.utils import SedonaKryoRegistrator, KryoSerializer
 
-
-
-# Define neural network architecture
 class Classifier(nn.Module):
 
     def __init__(self, input_size, hidden_size, output_size):
@@ -82,15 +76,14 @@ def impute(data):
 
 def categoriesToNumbers(data):
     for i, row in data.iterrows():
-        val = data.at[i,'algae bloom']
-        res = 1 if val == 'yes' else 0
-        data.at[i,'algae bloom'] = res
+        alg = data.at[i,'algae bloom']
+        alg_res = 1 if alg == 'yes' else 0
+        data.at[i,'algae bloom'] = alg_res
 
-
-def getData(input_path):
-    data = pd.read_csv(input_path)
-    data = data.drop(['date'], axis=1)
-    return data
+        date = data.at[i, 'week']
+        parts = date.split('-')
+        date_res = int(parts[1])
+        data.at[i,'week'] = date_res
 
 
 def convertToInt(data):
@@ -113,14 +106,14 @@ def getTensors(X, y):
 
 def formatData(data):
     categoriesToNumbers(data)
-    data = impute(data)
-    convertToInt(data)
+    # data = impute(data)
+    # convertToInt(data)
     return data
 
 
 def train():
 
-    data_path = '/cs535/termProject/input_data.csv'
+    data_path = '/cs535/termProject/input_data_no_header.csv'
 
     client = InsecureClient('http://richmond.cs.colostate.edu:30102')
     with client.read(data_path) as reader:
@@ -128,11 +121,8 @@ def train():
         csv_data = csv_data.decode('utf-8')
         csv_stream = io.StringIO(csv_data)
         csv_reader = csv.reader(csv_stream)
-        data_raw = [row for row in csv_reader]
-    data_raw = pd.DataFrame(data_raw)
-    print(data_raw[:5])
-
-    data_raw = data_raw.drop(['date'], axis=1)
+        data_raw = [row for row in csv_reader][1:]
+    data_raw = pd.DataFrame(data_raw, columns=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom'])
 
     data = formatData(data_raw)
     print(data[:5])
