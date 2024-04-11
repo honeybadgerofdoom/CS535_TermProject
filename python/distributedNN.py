@@ -29,7 +29,7 @@ import torch.distributed as dist
 
 class Classifier(nn.Module):
 
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size=6, hidden_size=25, output_size=2):
         super(Classifier, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.relu = nn.ReLU()
@@ -54,7 +54,7 @@ class Partition(object):
         return len(self.data.index)
 
     def __getitem__(self, index):
-        data_idx = self.index[index]
+        data_idx = self.index[index]  # FIXME This is throwing an IndexError
         return self.data[data_idx]
 
 
@@ -71,7 +71,7 @@ class DataPartitioner(object):
 
         for frac in sizes:
             part_len = int(frac * data_len)
-            self.partitions.append(indexes[0:part_len])
+            self.partitions.append(indexes[:part_len])
             indexes = indexes[part_len:]
 
     def use(self, partition):
@@ -175,7 +175,7 @@ def run():
         print('using cuda')
     else:
         model = nn.parallel.DistributedDataParallel(Classifier()).float()
-    optimizer = optim.SGD(model.paremeters(), lr=0.01, momentum=0.5)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
     criterion = nn.CrossEntropyLoss()
     num_batches = np.ceil(len(train_set.dataset) / float(bsz))
     best_loss = float("inf")
