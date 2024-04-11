@@ -149,11 +149,37 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filledLength = int(length * iteration // total)
     bar = fill * filledLength + '-' * (length - filledLength)
+    print('\r%s |%s| %s %% %s' % (prefix, bar, percent, suffix), end=printEnd)
+    if (iteration == total):
+        print()
 
 
-def train():
+def average_gradients(model):
+    size = float(dist.get_world_size())
+    for param in model.parameters():
+        dist.all_reduce(param.grad.data, op=dist.reduce_op.SUM)
+        param.grad.data /= size
+
+
+def load_model(model, path):
+    model.load_state_dict(torch.load(path))
+    return model
+
+
+def run():
     print('hello world')
+    torch.manual_seed(1234)
     train_set, bsz = partition_dataset()
+    if torch.cuda.is_available():
+        model = nn.parallel.DistributedDataParallel(Classifier()).float().cuda()
+        print('using cuda')
+    else:
+        model = nn.parallel.DistributedDataParallel(Classifier()).float()
+    optimizer = optim.SGD(model.paremeters(), lr=0.01, momentum=0.5)
+    criterion = nn.CrossEntropyLoss()
+    num_batches = np.ceil(len(train_set.dataset) / float(bsz))
+    best_loss = float("inf")
+    
 
 
 def setup(rank, world_size):
@@ -168,6 +194,6 @@ if __name__ == "__main__":
         print('Please provide a rank and world size')
     try:
         setup(sys.argv[1], sys.argv[2])
-        train()
+        run()
     except Exception as e:
         traceback.print_exc()
