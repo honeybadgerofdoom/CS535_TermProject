@@ -13,9 +13,11 @@ from torch.multiprocessing import Process
 from torchvision import datasets, transforms
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from torch.utils import data
 from random import Random
+
 
 
 import io
@@ -44,23 +46,50 @@ class Classifier(nn.Module):
         return out
 
 
-class Partition(object):
-
-    def __init__(self, data, index):
-        self.data = data
-        self.index = index
+class CustomDataset(Dataset):
+    def __init__(self, dataframe):
+        self.dataframe = dataframe
+        self.transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
 
     def __len__(self):
-        return len(self.data.index)
+        return len(self.dataframe)
+
+    def __getitem__(self, idx):
+        features = self.transform(self.preprocess_features(self.dataframe.iloc[idx, :-1]))
+        label = torch.tensor(self.dataframe.iloc[idx, -1], dtype=torch.long)
+        return features, label
+
+    def preprocess_features(self, features):
+        print(f'features before\n{features}')
+        features = features.fillna(0)
+        features = features.astype(float)
+        print(f'features after\n{features}')
+        return features
+
+
+class Partition(object):
+
+    def __init__(self, data, partition):
+        self.data = data
+        self.partition = partition
+
+    def __len__(self):
+        return len(self.data)
 
     def __getitem__(self, index):
-        data_idx = self.index[index]  # FIXME This is throwing an IndexError
+        index = len(self.partition) % index
+        if index == len(self.partition):
+            index -= 1
+
+        data_idx = self.partition[index]
         return self.data[data_idx]
 
 
 class DataPartitioner(object):
 
-    def __init__(self, data, sizes=[0.7, 0.2, 0.1], seed=1234):
+    def __init__(self, data, partition_size, seed=1234):
         self.data = data
         self.partitions = []
         rng = Random()
@@ -69,13 +98,13 @@ class DataPartitioner(object):
         indexes = [x for x in range(0, data_len)]
         rng.shuffle(indexes)
 
-        for frac in sizes:
-            part_len = int(frac * data_len)
-            self.partitions.append(indexes[:part_len])
-            indexes = indexes[part_len:]
+        for i in range(dist.get_world_size()):
+            start_index = i * partition_size
+            end_index = (i + 1) * partition_size
+            self.partitions.append(indexes[start_index:end_index])
 
-    def use(self, partition):
-        return Partition(self.data, self.partitions[partition])
+    def use(self, rank):
+        return Partition(self.data, self.partitions[rank])
 
 
 
@@ -133,14 +162,24 @@ def partition_dataset():
         csv_reader = csv.reader(csv_stream)
         data_raw = [row for row in csv_reader][1:]
     data_raw = pd.DataFrame(data_raw, columns=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom'])
-    dataset = formatData(data_raw)
-    print(dataset[:5])
+    data = formatData(data_raw)
+    data = data[pd.to_numeric(data['temperature'], errors='coerce').notnull()]
+    data = data[pd.to_numeric(data['nitrate'], errors='coerce').notnull()]
+    data = data[pd.to_numeric(data['phosphorus'], errors='coerce').notnull()]
+    data = data[pd.to_numeric(data['flow'], errors='coerce').notnull()]
+    data = data[pd.to_numeric(data['ph'], errors='coerce').notnull()]
+    data = data.dropna()
+    print(len(data.index), data[:5])
 
     size = dist.get_world_size()
     bsz = int(128 / float(size))
-    partition_sizes = [1.0 / size for _ in range(size)]
-    partition = DataPartitioner(dataset, partition_sizes)
+    partition_size = len(data.index) // size
+
+    dataset = CustomDataset(data)
+
+    partition = DataPartitioner(dataset, partition_size)
     partition = partition.use(dist.get_rank())
+
     train_set = torch.utils.data.DataLoader(partition, batch_size=bsz, shuffle=True)
     return train_set, bsz
 
@@ -170,6 +209,7 @@ def run():
     print('hello world')
     torch.manual_seed(1234)
     train_set, bsz = partition_dataset()
+
     if torch.cuda.is_available():
         model = nn.parallel.DistributedDataParallel(Classifier()).float().cuda()
         print('using cuda')
@@ -180,6 +220,7 @@ def run():
     num_batches = np.ceil(len(train_set.dataset) / float(bsz))
     best_loss = float("inf")
     num_epochs = 10
+
     for epoch in range(num_epochs):
         epoch_loss = 0.0
         print_progress_bar(0, len(train_set), prefix='Progress: ', suffix='Complete', length=50)
