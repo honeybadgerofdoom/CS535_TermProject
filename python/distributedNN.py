@@ -17,7 +17,7 @@ from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from torch.utils import data
 from random import Random
-
+from sklearn.model_selection import train_test_split
 
 
 import io
@@ -46,66 +46,16 @@ class Classifier(nn.Module):
         return out
 
 
-class CustomDataset(Dataset):
-    def __init__(self, dataframe):
-        self.dataframe = dataframe
-        self.transform = transforms.Compose([
-            transforms.ToTensor()
-        ])
-
-    def __len__(self):
-        return len(self.dataframe)
-
-    def __getitem__(self, idx):
-        features = self.transform(self.preprocess_features(self.dataframe.iloc[idx, :-1]))
-        label = torch.tensor(self.dataframe.iloc[idx, -1], dtype=torch.long)
-        return features, label
-
-    def preprocess_features(self, features):
-        print(f'features before\n{features}')
-        features = features.fillna(0)
-        features = features.astype(float)
-        print(f'features after\n{features}')
-        return features
-
-
-class Partition(object):
-
-    def __init__(self, data, partition):
-        self.data = data
-        self.partition = partition
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        index = len(self.partition) % index
-        if index == len(self.partition):
-            index -= 1
-
-        data_idx = self.partition[index]
-        return self.data[data_idx]
-
-
 class DataPartitioner(object):
 
-    def __init__(self, data, partition_size, seed=1234):
-        self.data = data
-        self.partitions = []
-        rng = Random()
-        rng.seed(seed)
-        data_len = len(data)
-        indexes = [x for x in range(0, data_len)]
-        rng.shuffle(indexes)
-
-        for i in range(dist.get_world_size()):
-            start_index = i * partition_size
-            end_index = (i + 1) * partition_size
-            self.partitions.append(indexes[start_index:end_index])
+    def __init__(self, df):
+        self.df = df
+        self.partitions = np.split(df, dist.get_world_size())
+        for partition in self.partitions:
+            print(type(partition), partition)
 
     def use(self, rank):
-        return Partition(self.data, self.partitions[rank])
-
+        return self.partitions[rank]
 
 
 def impute(data):
@@ -130,9 +80,9 @@ def convertToInt(data):
     data['algae bloom'] = data['algae bloom'].astype(int)
 
 
-def getFeaturesAndTarget(data, features: list, target: str):
-    X = data[features]
-    y = data[target]
+def getFeaturesAndTarget(df, features: list, target: str):
+    X = df[features]
+    y = df[target]
     return X, y
 
 
@@ -171,17 +121,13 @@ def partition_dataset():
     data = data.dropna()
     print(len(data.index), data[:5])
 
-    size = dist.get_world_size()
-    bsz = int(128 / float(size))
-    partition_size = len(data.index) // size
+    leftover = len(data.index) % dist.get_world_size()
+    drop_indexes = [x for x in range(leftover)]
+    data = data.drop(drop_indexes)
 
-    dataset = CustomDataset(data)
-
-    partition = DataPartitioner(dataset, partition_size)
-    partition = partition.use(dist.get_rank())
-
-    train_set = torch.utils.data.DataLoader(partition, batch_size=bsz, shuffle=True)
-    return train_set, bsz
+    partitioner = DataPartitioner(data)
+    partition = partitioner.use(dist.get_rank())
+    return partition
 
 
 def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='', printEnd='\r'):
@@ -208,37 +154,53 @@ def load_model(model, path):
 def run():
     print('hello world')
     torch.manual_seed(1234)
-    train_set, bsz = partition_dataset()
+    partition = partition_dataset()
+    print(type(partition), partition[:5])
 
-    if torch.cuda.is_available():
-        model = nn.parallel.DistributedDataParallel(Classifier()).float().cuda()
-        print('using cuda')
-    else:
-        model = nn.parallel.DistributedDataParallel(Classifier()).float()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
+    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
+    target = 'algae bloom'
+    X, y = getFeaturesAndTarget(partition, features, target)
+
+    print(f'X type: {type(X)}, y type: {type(y)}')
+
+    X_tensor, y_tensor = getTensors(X, y)
+
+    # train/test split
+    X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
+
+    # hyperparameters
+    input_size = X_train.shape[1]
+    hidden_size = 25  # 5 predictors... no sure what I sure set here
+    output_size = 2  # 2 classes "yes" (1), "no" (0)
+
+    # model, loss function, optimizer
+    model = Classifier(input_size, hidden_size, output_size)
     criterion = nn.CrossEntropyLoss()
-    num_batches = np.ceil(len(train_set.dataset) / float(bsz))
-    best_loss = float("inf")
-    num_epochs = 10
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+    # Training the model
+    num_epochs = 100
     for epoch in range(num_epochs):
-        epoch_loss = 0.0
-        print_progress_bar(0, len(train_set), prefix='Progress: ', suffix='Complete', length=50)
-        for i, (data, target) in enumerate(train_set):
-            if torch.cuda.is_available():
-                data, target = data.cuda(), target.cuda()
-            optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target)
-            epoch_loss += loss.item()
-            loss.backward()
-            average_gradients(model)
-            optimizer.step()
-            print_progress_bar(i+1, len(train_set), prefix='Progress: ', suffix='Complete', length=50)
-            print('Rank ', dist.get_rank(), ', epoch ', epoch, ': ', epoch_loss / num_batches)
-            if dist.get_rank() == 0 and epoch_loss / num_batches < best_loss:
-                best_loss = epoch_loss / num_batches
-                torch.save(model.state_dict(), 'best_model.pth')
+
+        # Forward pass
+        outputs = model(X_train)
+        loss = criterion(outputs, y_train)
+
+        # Backward pass & optimization
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if (epoch+1) % 10 == 0:
+            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+
+    # Evaluation
+    with torch.no_grad():
+        model.eval()
+        outputs = model(X_test)
+        _, predicted = torch.max(outputs, 1)
+        accuracy = (predicted == y_test).sum().item() / y_test.size(0)
+        print(f'Accuracy: {accuracy:.4f}')
 
 
 def setup(rank, world_size):

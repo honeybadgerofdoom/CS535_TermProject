@@ -63,6 +63,7 @@ def getFeaturesAndTarget(data, features: list, target: str):
 
 
 def getTensors(X, y):
+    print(type(X), type(y))
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
