@@ -1,22 +1,11 @@
 import os
 import sys
 import torch
-import random
 import numpy as np
-import subprocess
-import math
-from skimage.transform import resize
-import socket
 import traceback
 import datetime
-from torch.multiprocessing import Process
-from torchvision import datasets, transforms
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
-from torch.utils import data
-from random import Random
 from sklearn.model_selection import train_test_split
 
 
@@ -51,8 +40,6 @@ class DataPartitioner(object):
     def __init__(self, df):
         self.df = df
         self.partitions = np.split(df, dist.get_world_size())
-        for partition in self.partitions:
-            print(type(partition), partition)
 
     def use(self, rank):
         return self.partitions[rank]
@@ -90,7 +77,7 @@ def getTensors(X, y):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
-    y_tensor = torch.tensor(y, dtype=torch.long)
+    y_tensor = torch.tensor(y.tolist(), dtype=torch.long)
     return X_tensor, y_tensor
 
 
@@ -119,7 +106,6 @@ def partition_dataset():
     data = data[pd.to_numeric(data['flow'], errors='coerce').notnull()]
     data = data[pd.to_numeric(data['ph'], errors='coerce').notnull()]
     data = data.dropna()
-    print(len(data.index), data[:5])
 
     leftover = len(data.index) % dist.get_world_size()
     drop_indexes = [x for x in range(leftover)]
@@ -152,16 +138,14 @@ def load_model(model, path):
 
 
 def run():
-    print('hello world')
     torch.manual_seed(1234)
     partition = partition_dataset()
-    print(type(partition), partition[:5])
+    print(partition[:5])
 
     features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
     target = 'algae bloom'
     X, y = getFeaturesAndTarget(partition, features, target)
 
-    print(f'X type: {type(X)}, y type: {type(y)}')
 
     X_tensor, y_tensor = getTensors(X, y)
 

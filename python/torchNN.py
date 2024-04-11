@@ -48,7 +48,6 @@ def getData(input_path):
         usecols=[0,1,2,3,4,5,6],
         names=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom']
     )
-    print(data.head())
     return data
 
 
@@ -63,11 +62,15 @@ def getFeaturesAndTarget(data, features: list, target: str):
 
 
 def getTensors(X, y):
-    print(type(X), type(y))
+    print('getTensors()')
+    print(type(y))
+    print(y)
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
     y_tensor = torch.tensor(y, dtype=torch.long)
+    print('tensors calculated...')
+    print(y_tensor)
     return X_tensor, y_tensor
 
 
