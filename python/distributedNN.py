@@ -140,7 +140,6 @@ def load_model(model, path):
 def run():
     torch.manual_seed(1234)
     partition = partition_dataset()
-    print(partition[:5])
 
     features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
     target = 'algae bloom'
@@ -148,29 +147,23 @@ def run():
 
 
     X_tensor, y_tensor = getTensors(X, y)
-
     # train/test split
     X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
 
-    # hyperparameters
     input_size = X_train.shape[1]
     hidden_size = 25  # 5 predictors... no sure what I sure set here
     output_size = 2  # 2 classes "yes" (1), "no" (0)
 
-    # model, loss function, optimizer
     model = Classifier(input_size, hidden_size, output_size)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    # Training the model
     num_epochs = 100
     for epoch in range(num_epochs):
 
-        # Forward pass
         outputs = model(X_train)
         loss = criterion(outputs, y_train)
 
-        # Backward pass & optimization
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -178,7 +171,6 @@ def run():
         if (epoch+1) % 10 == 0:
             print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
 
-    # Evaluation
     with torch.no_grad():
         model.eval()
         outputs = model(X_test)
