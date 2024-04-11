@@ -179,7 +179,25 @@ def run():
     criterion = nn.CrossEntropyLoss()
     num_batches = np.ceil(len(train_set.dataset) / float(bsz))
     best_loss = float("inf")
-    
+    num_epochs = 10
+    for epoch in range(num_epochs):
+        epoch_loss = 0.0
+        print_progress_bar(0, len(train_set), prefix='Progress: ', suffix='Complete', length=50)
+        for i, (data, target) in enumerate(train_set):
+            if torch.cuda.is_available():
+                data, target = data.cuda(), target.cuda()
+            optimizer.zero_grad()
+            output = model(data)
+            loss = criterion(output, target)
+            epoch_loss += loss.item()
+            loss.backward()
+            average_gradients(model)
+            optimizer.step()
+            print_progress_bar(i+1, len(train_set), prefix='Progress: ', suffix='Complete', length=50)
+            print('Rank ', dist.get_rank(), ', epoch ', epoch, ': ', epoch_loss / num_batches)
+            if dist.get_rank() == 0 and epoch_loss / num_batches < best_loss:
+                best_loss = epoch_loss / num_batches
+                torch.save(model.state_dict(), 'best_model.pth')
 
 
 def setup(rank, world_size):
