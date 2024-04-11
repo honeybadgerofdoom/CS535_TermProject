@@ -107,7 +107,8 @@ def getTensors(X, y):
 def formatData(data):
     categoriesToNumbers(data)
     # data = impute(data)
-    # convertToInt(data)
+    data = data.dropna()
+    convertToInt(data)
     return data
 
 
@@ -129,7 +130,7 @@ def train():
 
     '''
 
-    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']
+    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
     target = 'algae bloom'
     X, y = getFeaturesAndTarget(data, features, target)
 
