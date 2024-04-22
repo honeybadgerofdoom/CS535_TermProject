@@ -25,12 +25,16 @@ class Classifier(nn.Module):
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, output_size)
+        # self.fc3 = nn.Linear(5, 100)
+        # self.fc4 = nn.Linear(100, output_size)
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
         out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)
+        # out = self.fc3(out)
+        # out = self.fc4(out)
         out = self.softmax(out)
         return out
 
@@ -83,8 +87,6 @@ def getTensors(X, y):
 
 def formatData(data):
     categoriesToNumbers(data)
-    # data = impute(data)
-    data = data.dropna()
     convertToInt(data)
     return data
 
@@ -101,11 +103,19 @@ def partition_dataset():
     data_raw = pd.DataFrame(data_raw, columns=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom'])
     data = formatData(data_raw)
     data = data[pd.to_numeric(data['temperature'], errors='coerce').notnull()]
+    data = data[pd.to_numeric(data['flow'], errors='coerce').notnull()]
     data = data[pd.to_numeric(data['nitrate'], errors='coerce').notnull()]
     data = data[pd.to_numeric(data['phosphorus'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['flow'], errors='coerce').notnull()]
     data = data[pd.to_numeric(data['ph'], errors='coerce').notnull()]
-    data = data.dropna()
+    # data = impute(data)  # This throws an error: `ValueError: Cannot use mean strategy with non-numeric data: could not convert string to float: ''`
+
+    count_1 = (data['algae bloom'] == 1).sum()
+    df_0 = data[data['algae bloom'] == 0].sample(n=count_1, random_state=42)
+    df_1 = data[data['algae bloom'] == 1]
+    balanced_df = pd.concat([df_0, df_1])
+    data = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    print(f'Total Rows: {len(data.index)}')
 
     leftover = len(data.index) % dist.get_world_size()
     drop_indexes = [x for x in range(leftover)]
@@ -137,28 +147,41 @@ def load_model(model, path):
     return model
 
 
+def calculate_metrics(y_true, y_pred):
+    TP = ((y_true == 1) & (y_pred == 1)).sum().item()
+    FP = ((y_true == 0) & (y_pred == 1)).sum().item()
+    FN = ((y_true == 1) & (y_pred == 0)).sum().item()
+
+    precision = TP / (TP + FP) if (TP + FP) != 0 else 0
+    recall = TP / (TP + FN) if (TP + FN) != 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) != 0 else 0
+
+    return precision, recall, f1_score
+
+
 def run():
     torch.manual_seed(1234)
     partition = partition_dataset()
 
-    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
+    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']
     target = 'algae bloom'
     X, y = getFeaturesAndTarget(partition, features, target)
 
 
     X_tensor, y_tensor = getTensors(X, y)
-    # train/test split
     X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
 
     input_size = X_train.shape[1]
-    hidden_size = 25  # 5 predictors... no sure what I sure set here
-    output_size = 2  # 2 classes "yes" (1), "no" (0)
+    hidden_size = 500
+    output_size = 2
 
     model = Classifier(input_size, hidden_size, output_size)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # optimizer = optim.Adam(model.parameters(), lr=0.05)
+    # optimizer = optim.Adam(model.parameters(), lr=0.05)
+    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
 
-    num_epochs = 100
+    num_epochs = 1000
     for epoch in range(num_epochs):
 
         outputs = model(X_train)
@@ -176,7 +199,11 @@ def run():
         outputs = model(X_test)
         _, predicted = torch.max(outputs, 1)
         accuracy = (predicted == y_test).sum().item() / y_test.size(0)
+
         print(f'Accuracy: {accuracy:.4f}')
+
+        precision, recall, f1_score = calculate_metrics(y_test, predicted)
+        print(f'Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}')
 
 
 def setup(rank, world_size):
