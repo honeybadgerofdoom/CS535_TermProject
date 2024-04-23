@@ -65,12 +65,13 @@ class Classifier(nn.Module):
 
 class MoreComplexClassifier(nn.Module):
 
-    def __init__(self, input_size=6, output_size=2, hidden_size1=100, hidden_size2=250, hidden_size3=25, dropout_prob=0.5):
+    def __init__(self, input_size=6, output_size=2, hidden_size1=100, hidden_size2=250, hidden_size3=125, hidden_size4=5, dropout_prob=0.5):
         super(MoreComplexClassifier, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size1)
         self.fc2 = nn.Linear(hidden_size1, hidden_size2)
         self.fc3 = nn.Linear(hidden_size2, hidden_size3)
-        self.fc4 = nn.Linear(hidden_size3, output_size)
+        self.fc4 = nn.Linear(hidden_size3, hidden_size4)
+        self.fc5 = nn.Linear(hidden_size4, output_size)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout_prob)
         self.softmax = nn.Softmax(dim=1)
@@ -86,6 +87,9 @@ class MoreComplexClassifier(nn.Module):
         out = self.relu(out)
         out = self.dropout(out)
         out = self.fc4(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc5(out)
         out = self.softmax(out)
         return out
 
@@ -258,7 +262,10 @@ def run():
 
                     precision, recall, f1_score = calculate_metrics(y_test, predicted)
                     optName = optimizer['name']
-                    print(f'Mode: {model_name}, Predictors: {key}, Optimizer: {optName}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}')
+                    outputStr = f'Mode: {model_name}, Predictors: {key}, Optimizer: {optName}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}'
+                    print(outputStr)
+                    with open (f'partition_{dist.get_rank()}.txt', 'a') as f:
+                        f.write(outputStr + "\n")
 
 
 def setup(rank, world_size):

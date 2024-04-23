@@ -27,10 +27,10 @@ def formatForOverleaf(row):
 
 
 def main():
-    p1 = open('../partition_output/partition1.txt', 'r')
-    p2 = open('../partition_output/partition2.txt', 'r')
-    p3 = open('../partition_output/partition3.txt', 'r')
-    p4 = open('../partition_output/partition4.txt', 'r')
+    p1 = open('partition_0.txt', 'r')
+    p2 = open('partition_1.txt', 'r')
+    p3 = open('partition_2.txt', 'r')
+    p4 = open('partition_3.txt', 'r')
     lines1 = p1.readlines()
     lines2 = p2.readlines()
     lines3 = p3.readlines()
@@ -53,9 +53,9 @@ def main():
     for index, row in df_sorted_accuracy.iterrows():
         if i > 15:
             break
+        print(row.to_dict())
         entry = formatForOverleaf(row.to_dict())
-        print(entry)
-        with open ('output.txt', 'a') as f:
+        with open('output.txt', 'a') as f:
             f.write(entry + "\n")
         i += 1
 
