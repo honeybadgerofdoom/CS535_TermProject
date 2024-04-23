@@ -1,3 +1,4 @@
+import pandas as pd
 
 def strToDict(string):
     pairs = [pair.strip().split(': ') for pair in string.split(',')]
@@ -15,9 +16,9 @@ def buildAverage(data):
                 counts[key] += 1
 
     averages = {key: sums[key] / counts[key] for key in sums}
-    averages['Mode'] = data['Mode']
-    averages['Predictors'] = data['Predictors']
-    averages['Optimizer'] = data['Optimizer']
+    averages['Mode'] = data[0]['Mode']
+    averages['Predictors'] = data[0]['Predictors']
+    averages['Optimizer'] = data[0]['Optimizer']
     return averages
 
 def main():
@@ -40,9 +41,10 @@ def main():
     d4 = [strToDict(x.strip()) for x in lines4]
     zipped_array = list(zip(d1, d2, d3, d4))
 
-    for entry in zipped_array:
-        # print(entry)
-        print(buildAverage(entry))
+    averaged = [buildAverage(x) for x in zipped_array]
+    df = pd.DataFrame(averaged)
+    df_sorted_accuracy = df.sort_values(by='Accuracy', ascending=False)
+    print(df_sorted_accuracy)
 
 
 if __name__ == "__main__":
