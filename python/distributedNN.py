@@ -17,11 +17,18 @@ from sklearn.impute import SimpleImputer
 from hdfs import InsecureClient
 import torch.distributed as dist
 
+predictor_combinations = {
+    'ALL': ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week'],
+    'CHEMICALS': ['nitrate', 'phosphorus', 'ph',],
+    'NUTRIENTS': ['nitrate', 'phosphorus',],
+    'ENVIRONMENTAL': ['temperature', 'flow'],
+    'NO_TIME': ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph'],
+    'TEMPERATURE': ['temperature']
+}
 
-class Classifier(nn.Module):
-
-    def __init__(self, input_size=6, hidden_size=25, output_size=2):
-        super(Classifier, self).__init__()
+class ClassifierSimple(nn.Module):
+    def __init__(self, input_size=6, output_size=2, hidden_size=25):
+        super(ClassifierSimple, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, output_size)
@@ -33,6 +40,61 @@ class Classifier(nn.Module):
         out = self.fc2(out)
         out = self.softmax(out)
         return out
+
+class Classifier(nn.Module):
+
+    def __init__(self, input_size=6, output_size=2, hidden_size1=250, hidden_size2=125, dropout_prob=0.5):
+        super(Classifier, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size1)
+        self.fc2 = nn.Linear(hidden_size1, hidden_size2)
+        self.fc3 = nn.Linear(hidden_size2, output_size)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_prob)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        out = self.fc1(x)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc2(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc3(out)
+        out = self.softmax(out)
+        return out
+
+class MoreComplexClassifier(nn.Module):
+
+    def __init__(self, input_size=6, output_size=2, hidden_size1=100, hidden_size2=250, hidden_size3=25, dropout_prob=0.5):
+        super(MoreComplexClassifier, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size1)
+        self.fc2 = nn.Linear(hidden_size1, hidden_size2)
+        self.fc3 = nn.Linear(hidden_size2, hidden_size3)
+        self.fc4 = nn.Linear(hidden_size3, output_size)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_prob)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        out = self.fc1(x)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc2(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc3(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc4(out)
+        out = self.softmax(out)
+        return out
+
+
+classifiers = [
+    {'name': 'Simple', 'cl': ClassifierSimple},
+    {'name': 'General', 'cl': Classifier},
+    {'name': 'Complex', 'cl': MoreComplexClassifier},
+]
 
 
 class DataPartitioner(object):
@@ -83,13 +145,11 @@ def getTensors(X, y):
 
 def formatData(data):
     categoriesToNumbers(data)
-    # data = impute(data)
-    data = data.dropna()
     convertToInt(data)
     return data
 
 
-def partition_dataset():
+def partition_dataset(predictors):
     data_path = '/cs535/termProject/input_data_no_header.csv'
     client = InsecureClient('http://richmond.cs.colostate.edu:30102')
     with client.read(data_path) as reader:
@@ -100,12 +160,14 @@ def partition_dataset():
         data_raw = [row for row in csv_reader][1:]
     data_raw = pd.DataFrame(data_raw, columns=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom'])
     data = formatData(data_raw)
-    data = data[pd.to_numeric(data['temperature'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['nitrate'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['phosphorus'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['flow'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['ph'], errors='coerce').notnull()]
-    data = data.dropna()
+    for predictor in predictors:
+        data = data[pd.to_numeric(data[predictor], errors='coerce').notnull()]
+
+    count_1 = (data['algae bloom'] == 1).sum()
+    df_0 = data[data['algae bloom'] == 0].sample(n=count_1, random_state=42)
+    df_1 = data[data['algae bloom'] == 1]
+    balanced_df = pd.concat([df_0, df_1])
+    data = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     leftover = len(data.index) % dist.get_world_size()
     drop_indexes = [x for x in range(leftover)]
@@ -137,54 +199,66 @@ def load_model(model, path):
     return model
 
 
+def calculate_metrics(y_true, y_pred):
+    TP = ((y_true == 1) & (y_pred == 1)).sum().item()
+    FP = ((y_true == 0) & (y_pred == 1)).sum().item()
+    FN = ((y_true == 1) & (y_pred == 0)).sum().item()
+
+    precision = TP / (TP + FP) if (TP + FP) != 0 else 0
+    recall = TP / (TP + FN) if (TP + FN) != 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) != 0 else 0
+
+    return precision, recall, f1_score
+
+
 def run():
     torch.manual_seed(1234)
-    partition = partition_dataset()
-    print(partition[:5])
 
-    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week']
-    target = 'algae bloom'
-    X, y = getFeaturesAndTarget(partition, features, target)
+    for key in predictor_combinations:
+        predictors = predictor_combinations[key]
+        partition = partition_dataset(predictors)
+
+        target = 'algae bloom'
+        X, y = getFeaturesAndTarget(partition, predictors, target)
 
 
-    X_tensor, y_tensor = getTensors(X, y)
+        X_tensor, y_tensor = getTensors(X, y)
+        X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
 
-    # train/test split
-    X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
+        input_size = X_train.shape[1]
+        output_size = 2
 
-    # hyperparameters
-    input_size = X_train.shape[1]
-    hidden_size = 25  # 5 predictors... no sure what I sure set here
-    output_size = 2  # 2 classes "yes" (1), "no" (0)
+        for classifier in classifiers:
 
-    # model, loss function, optimizer
-    model = Classifier(input_size, hidden_size, output_size)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+            model_name = classifier['name']
+            model = classifier['cl'](input_size, output_size)
+            criterion = nn.CrossEntropyLoss()
+            sgd = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+            adam = optim.Adam(model.parameters(), lr=0.001)
 
-    # Training the model
-    num_epochs = 100
-    for epoch in range(num_epochs):
+            optimizers = [{'name': 'SGD', 'opt': sgd}, {'name': 'Adam', 'opt': adam}]
 
-        # Forward pass
-        outputs = model(X_train)
-        loss = criterion(outputs, y_train)
+            num_epochs = 1000
 
-        # Backward pass & optimization
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            for optimizer in optimizers:
+                for epoch in range(num_epochs):
 
-        if (epoch+1) % 10 == 0:
-            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+                    outputs = model(X_train)
+                    loss = criterion(outputs, y_train)
 
-    # Evaluation
-    with torch.no_grad():
-        model.eval()
-        outputs = model(X_test)
-        _, predicted = torch.max(outputs, 1)
-        accuracy = (predicted == y_test).sum().item() / y_test.size(0)
-        print(f'Accuracy: {accuracy:.4f}')
+                    optimizer['opt'].zero_grad()
+                    loss.backward()
+                    optimizer['opt'].step()
+
+                with torch.no_grad():
+                    model.eval()
+                    outputs = model(X_test)
+                    _, predicted = torch.max(outputs, 1)
+                    accuracy = (predicted == y_test).sum().item() / y_test.size(0)
+
+                    precision, recall, f1_score = calculate_metrics(y_test, predicted)
+                    optName = optimizer['name']
+                    print(f'Mode: {model_name}, Predictors: {key}, Optimizer: {optName}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}')
 
 
 def setup(rank, world_size):
