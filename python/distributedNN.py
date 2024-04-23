@@ -26,6 +26,21 @@ predictor_combinations = {
     'TEMPERATURE': ['temperature']
 }
 
+class ClassifierSimple(nn.Module):
+    def __init__(self, input_size=6, output_size=2, hidden_size=25):
+        super(ClassifierSimple, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(hidden_size, output_size)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        out = self.fc1(x)
+        out = self.relu(out)
+        out = self.fc2(out)
+        out = self.softmax(out)
+        return out
+
 class Classifier(nn.Module):
 
     def __init__(self, input_size=6, output_size=2, hidden_size1=250, hidden_size2=125, dropout_prob=0.5):
@@ -47,6 +62,39 @@ class Classifier(nn.Module):
         out = self.fc3(out)
         out = self.softmax(out)
         return out
+
+class MoreComplexClassifier(nn.Module):
+
+    def __init__(self, input_size=6, output_size=2, hidden_size1=100, hidden_size2=50, hidden_size3=25, dropout_prob=0.5):
+        super(MoreComplexClassifier, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size1)
+        self.fc2 = nn.Linear(hidden_size1, hidden_size2)
+        self.fc3 = nn.Linear(hidden_size2, hidden_size3)
+        self.fc4 = nn.Linear(hidden_size3, output_size)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_prob)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        out = self.fc1(x)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc2(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc3(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc4(out)
+        out = self.softmax(out)
+        return out
+
+
+classifiers = [
+    {'name': 'Simple', 'cl': ClassifierSimple},
+    {'name': 'General', 'cl': Classifier},
+    {'name': 'Complex', 'cl': MoreComplexClassifier},
+]
 
 
 class DataPartitioner(object):
@@ -180,34 +228,37 @@ def run():
         input_size = X_train.shape[1]
         output_size = 2
 
-        model = Classifier(input_size, output_size)
-        criterion = nn.CrossEntropyLoss()
-        sgd = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        adam = optim.Adam(model.parameters(), lr=0.001)
+        for classifier in classifiers:
 
-        optimizers = [{'name': 'SGD', 'opt': sgd}, {'name': 'ADAM', 'opt': adam}]
+            model_name = classifier['name']
+            model = classifier['cl'](input_size, output_size)
+            criterion = nn.CrossEntropyLoss()
+            sgd = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+            adam = optim.Adam(model.parameters(), lr=0.001)
 
-        num_epochs = 1000
+            optimizers = [{'name': 'SGD', 'opt': sgd}, {'name': 'ADAM', 'opt': adam}]
 
-        for optimizer in optimizers:
-            for epoch in range(num_epochs):
+            num_epochs = 1000
 
-                outputs = model(X_train)
-                loss = criterion(outputs, y_train)
+            for optimizer in optimizers:
+                for epoch in range(num_epochs):
 
-                optimizer['opt'].zero_grad()
-                loss.backward()
-                optimizer['opt'].step()
+                    outputs = model(X_train)
+                    loss = criterion(outputs, y_train)
 
-            with torch.no_grad():
-                model.eval()
-                outputs = model(X_test)
-                _, predicted = torch.max(outputs, 1)
-                accuracy = (predicted == y_test).sum().item() / y_test.size(0)
+                    optimizer['opt'].zero_grad()
+                    loss.backward()
+                    optimizer['opt'].step()
 
-                precision, recall, f1_score = calculate_metrics(y_test, predicted)
-                optName = optimizer['name']
-                print(f'Predictors: {key}, Optimizer: {optName}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}')
+                with torch.no_grad():
+                    model.eval()
+                    outputs = model(X_test)
+                    _, predicted = torch.max(outputs, 1)
+                    accuracy = (predicted == y_test).sum().item() / y_test.size(0)
+
+                    precision, recall, f1_score = calculate_metrics(y_test, predicted)
+                    optName = optimizer['name']
+                    print(f'Mode: {model_name}, Predictors: {key}, Optimizer: {optName}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}')
 
 
 def setup(rank, world_size):
