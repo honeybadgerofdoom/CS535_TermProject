@@ -65,7 +65,7 @@ class Classifier(nn.Module):
 
 class MoreComplexClassifier(nn.Module):
 
-    def __init__(self, input_size=6, output_size=2, hidden_size1=100, hidden_size2=50, hidden_size3=25, dropout_prob=0.5):
+    def __init__(self, input_size=6, output_size=2, hidden_size1=100, hidden_size2=250, hidden_size3=25, dropout_prob=0.5):
         super(MoreComplexClassifier, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size1)
         self.fc2 = nn.Linear(hidden_size1, hidden_size2)
@@ -236,7 +236,7 @@ def run():
             sgd = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
             adam = optim.Adam(model.parameters(), lr=0.001)
 
-            optimizers = [{'name': 'SGD', 'opt': sgd}, {'name': 'ADAM', 'opt': adam}]
+            optimizers = [{'name': 'SGD', 'opt': sgd}, {'name': 'Adam', 'opt': adam}]
 
             num_epochs = 1000
 

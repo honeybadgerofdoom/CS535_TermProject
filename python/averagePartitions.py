@@ -15,17 +15,22 @@ def buildAverage(data):
                 sums[key] += float(value)
                 counts[key] += 1
 
-    averages = {key: sums[key] / counts[key] for key in sums}
+    averages = {key: round(sums[key] / counts[key], 4) for key in sums}
     averages['Mode'] = data[0]['Mode']
     averages['Predictors'] = data[0]['Predictors']
     averages['Optimizer'] = data[0]['Optimizer']
     return averages
 
+
+def formatForOverleaf(row):
+    return f"{row['Mode']} & {row['Predictors']} & {row['Optimizer']} & {row['Accuracy']} & {row['Precision']} & {row['Recall']} & {row['F1 Score']} \\\\ \n\hline"
+
+
 def main():
-    p1 = open('../data/partition_output/partition1.txt', 'r')
-    p2 = open('../data/partition_output/partition2.txt', 'r')
-    p3 = open('../data/partition_output/partition3.txt', 'r')
-    p4 = open('../data/partition_output/partition4.txt', 'r')
+    p1 = open('../partition_output/partition1.txt', 'r')
+    p2 = open('../partition_output/partition2.txt', 'r')
+    p3 = open('../partition_output/partition3.txt', 'r')
+    p4 = open('../partition_output/partition4.txt', 'r')
     lines1 = p1.readlines()
     lines2 = p2.readlines()
     lines3 = p3.readlines()
@@ -44,7 +49,15 @@ def main():
     averaged = [buildAverage(x) for x in zipped_array]
     df = pd.DataFrame(averaged)
     df_sorted_accuracy = df.sort_values(by='Accuracy', ascending=False)
-    print(df_sorted_accuracy)
+    i = 0
+    for index, row in df_sorted_accuracy.iterrows():
+        if i > 15:
+            break
+        entry = formatForOverleaf(row.to_dict())
+        print(entry)
+        with open ('output.txt', 'a') as f:
+            f.write(entry + "\n")
+        i += 1
 
 
 if __name__ == "__main__":
