@@ -17,24 +17,34 @@ from sklearn.impute import SimpleImputer
 from hdfs import InsecureClient
 import torch.distributed as dist
 
+predictor_combinations = {
+    'ALL': ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week'],
+    'CHEMICALS': ['nitrate', 'phosphorus', 'ph',],
+    'NUTRIENTS': ['nitrate', 'phosphorus',],
+    'ENVIRONMENTAL': ['temperature', 'flow'],
+    'NO_TIME': ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph'],
+    'TEMPERATURE': ['temperature']
+}
 
 class Classifier(nn.Module):
 
-    def __init__(self, input_size=6, hidden_size=25, output_size=2):
+    def __init__(self, input_size=6, output_size=2, hidden_size1=250, hidden_size2=125, dropout_prob=0.5):
         super(Classifier, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc1 = nn.Linear(input_size, hidden_size1)
+        self.fc2 = nn.Linear(hidden_size1, hidden_size2)
+        self.fc3 = nn.Linear(hidden_size2, output_size)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_size, output_size)
-        # self.fc3 = nn.Linear(5, 100)
-        # self.fc4 = nn.Linear(100, output_size)
+        self.dropout = nn.Dropout(dropout_prob)
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
         out = self.fc1(x)
         out = self.relu(out)
+        out = self.dropout(out)
         out = self.fc2(out)
-        # out = self.fc3(out)
-        # out = self.fc4(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        out = self.fc3(out)
         out = self.softmax(out)
         return out
 
@@ -91,7 +101,7 @@ def formatData(data):
     return data
 
 
-def partition_dataset():
+def partition_dataset(predictors):
     data_path = '/cs535/termProject/input_data_no_header.csv'
     client = InsecureClient('http://richmond.cs.colostate.edu:30102')
     with client.read(data_path) as reader:
@@ -102,20 +112,14 @@ def partition_dataset():
         data_raw = [row for row in csv_reader][1:]
     data_raw = pd.DataFrame(data_raw, columns=['temperature', 'nitrate', 'phosphorus', 'flow', 'ph', 'week', 'algae bloom'])
     data = formatData(data_raw)
-    data = data[pd.to_numeric(data['temperature'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['flow'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['nitrate'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['phosphorus'], errors='coerce').notnull()]
-    data = data[pd.to_numeric(data['ph'], errors='coerce').notnull()]
-    # data = impute(data)  # This throws an error: `ValueError: Cannot use mean strategy with non-numeric data: could not convert string to float: ''`
+    for predictor in predictors:
+        data = data[pd.to_numeric(data[predictor], errors='coerce').notnull()]
 
     count_1 = (data['algae bloom'] == 1).sum()
     df_0 = data[data['algae bloom'] == 0].sample(n=count_1, random_state=42)
     df_1 = data[data['algae bloom'] == 1]
     balanced_df = pd.concat([df_0, df_1])
     data = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
-
-    print(f'Total Rows: {len(data.index)}')
 
     leftover = len(data.index) % dist.get_world_size()
     drop_indexes = [x for x in range(leftover)]
@@ -161,49 +165,49 @@ def calculate_metrics(y_true, y_pred):
 
 def run():
     torch.manual_seed(1234)
-    partition = partition_dataset()
 
-    features = ['temperature', 'nitrate', 'phosphorus', 'flow', 'ph']
-    target = 'algae bloom'
-    X, y = getFeaturesAndTarget(partition, features, target)
+    for key in predictor_combinations:
+        predictors = predictor_combinations[key]
+        partition = partition_dataset(predictors)
+
+        target = 'algae bloom'
+        X, y = getFeaturesAndTarget(partition, predictors, target)
 
 
-    X_tensor, y_tensor = getTensors(X, y)
-    X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
+        X_tensor, y_tensor = getTensors(X, y)
+        X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
 
-    input_size = X_train.shape[1]
-    hidden_size = 500
-    output_size = 2
+        input_size = X_train.shape[1]
+        output_size = 2
 
-    model = Classifier(input_size, hidden_size, output_size)
-    criterion = nn.CrossEntropyLoss()
-    # optimizer = optim.Adam(model.parameters(), lr=0.05)
-    # optimizer = optim.Adam(model.parameters(), lr=0.05)
-    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        model = Classifier(input_size, output_size)
+        criterion = nn.CrossEntropyLoss()
+        sgd = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        adam = optim.Adam(model.parameters(), lr=0.001)
 
-    num_epochs = 1000
-    for epoch in range(num_epochs):
+        optimizers = [{'name': 'SGD', 'opt': sgd}, {'name': 'ADAM', 'opt': adam}]
 
-        outputs = model(X_train)
-        loss = criterion(outputs, y_train)
+        num_epochs = 1000
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        for optimizer in optimizers:
+            for epoch in range(num_epochs):
 
-        if (epoch+1) % 10 == 0:
-            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+                outputs = model(X_train)
+                loss = criterion(outputs, y_train)
 
-    with torch.no_grad():
-        model.eval()
-        outputs = model(X_test)
-        _, predicted = torch.max(outputs, 1)
-        accuracy = (predicted == y_test).sum().item() / y_test.size(0)
+                optimizer['opt'].zero_grad()
+                loss.backward()
+                optimizer['opt'].step()
 
-        print(f'Accuracy: {accuracy:.4f}')
+            with torch.no_grad():
+                model.eval()
+                outputs = model(X_test)
+                _, predicted = torch.max(outputs, 1)
+                accuracy = (predicted == y_test).sum().item() / y_test.size(0)
 
-        precision, recall, f1_score = calculate_metrics(y_test, predicted)
-        print(f'Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}')
+                precision, recall, f1_score = calculate_metrics(y_test, predicted)
+                optName = optimizer['name']
+                print(f'Predictors: {key}, Optimizer: {optName}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}')
 
 
 def setup(rank, world_size):
