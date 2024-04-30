@@ -1,8 +1,5 @@
-import urllib.parse
 import pymongo
-import os
 import json
-import pandas as pd
 
 
 measurements = ["nitrate", "phosphorus"]
@@ -258,10 +255,8 @@ def appendToFile(fileName, data):
 
 
 def getDB():
-    username = urllib.parse.quote_plus(os.environ.get('READ_MONGO_USER'))
-    password = urllib.parse.quote_plus(os.environ.get('READ_MONGO_PASS'))
-    mongo = pymongo.MongoClient(f'mongodb://{username}:{password}@lattice-151:27018/')
-    db = mongo['sustaindb']
+    mongo = pymongo.MongoClient(f'mongodb_atlas://cs535_tp:superlemur55@mongo_atlas:41718/')
+    db = mongo['termProj']
     return db
 
 
